@@ -79,26 +79,41 @@ def find_voiced_instants(signal, contour, start, end, sampling_rate):
         return crossings
     # final test for pitch doublings: 5-width power-weighted median octave filter
     prev_length = crossings[1][0] - crossings[0][0]
-    for i,cross in enumerate(crossings):
-        if i < 2:
-          prev_cross = cross
-          continue
+    prev_cross = crossings[1]
+    i = 2
+    while i < len(crossings):
+        cross = crossings[i]
         length = cross[0] - prev_cross[0]
-        # is t mismatched with prior?
+        # is it mismatched with prior?
         if prev_length > length*1.5 or prev_length*1.5 < length:
-            # Test both directions and decide which values need removing (never add)
+            # NOTE: this means i-2:i-1 is different from i-1:i
+            # Test both directions around i-1 and decide which values need removing (never add)
             win_start = max(0,i-3)
-            win_end = min(len(crossings),i+4)
+            win_end = min(len(crossings),i+3)
             # find weighted median pitch period
             candidates = [ (crossings[k][0]-crossings[k-1][0],(crossings[k-1][1]+crossings[k][1])/2) for k in range(win_start,win_end) if crossings[k][0] > crossings[k-1][0]]
             w_median = find_weighted_median(candidates)
-            # if any two adjacent pitch periods are below median/1.5, merge them
-            for k in range(win_start+1,win_end):
-                if crossings[k][0] - crossings[k-1][0] < w_median/1.5 and crossings[k-1][0] - crossings[k-2][0] < w_median/1.5:
-                    crossings[k] = (crossings[k][0],max(crossings[k][1],crossings[k-1][1]))
-                    crossings[k-1] = (0,0)
-                    break
+            # select the merge side that results in a value closest to the median:
+            #  either i-2:i-1 with i-1:i  or i-1:i with i:i+1
+            if i < 2:
+                w1 = 0
+            else:
+                w1 = abs( w_median - (crossings[i][0] - crossings[i-2][0]) )
+            if i > len(crossings)-2:
+                w2 = 0
+            else:
+                w2 = abs( w_median - (crossings[i+1][0] - crossings[i-1][0]) )
+            if w1 < w_median//2 or w2 < w_median//2:
+              if w1 <=  w2: # merge into w1
+                crossings = crossings[:i-1]+crossings[i:]
+              else:
+                crossings = crossings[:i]+crossings[i+1:]
+              if i < len(crossings):
+                length = crossings[i][0] - crossings[i-1][0]
+                cross = crossings[i]
+        i += 1
         prev_cross = cross
         prev_length = length
+
     return [(c[0] + start_index, c[1]) for c in crossings if c[1] != 0]
 

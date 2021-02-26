@@ -1,3 +1,5 @@
+import math
+
 class PitchContour:
     def __init__(self, times, pitch, power):
         self.pitch = pitch
@@ -8,22 +10,60 @@ class PitchContour:
         # find weighted mode of pitch values
         self.mid_pitch = self.find_mode()
         print(self.mid_pitch," Hz")
-        
+
+        self.drift_pitch, self.drift_power = self.find_drift_modes()
+        drift_step = math.floor(0.25/self.window_size) # number of windows per drift value
+
         # determine strong power level (max peak in distribution?)
         self.high_power = self.find_upper_power()
         print(self.high_power," power")
-        # TODO: high power and mid pitch need to be rolling for long contours. Or just chop up the input?
+
         # zero low-power pitch entries
         limit = self.high_power/50
         for i, p in enumerate(self.power):
             if p < limit:
                 self.pitch[i] = 0
+        # and in the drift
+        limit = max(self.drift_power)/10
+        for i, p in enumerate(self.drift_power):
+            if p < limit:
+                self.drift_pitch[i] = 0
+            elif p > 0:
+                # remove any unlikely pitch doubling too
+                while p < self.mid_pitch/2:
+                    p *= 2
+                while p > self.mid_pitch*2:
+                    p /= 2
+
+        # interpolate across low-power regions for the drift
+        first_pitch = [p for p in self.drift_pitch if p > 0][0]
+        last_pitch =  [p for p in self.drift_pitch if p > 0][-1]
+        for i, p in enumerate(self.drift_pitch):
+            if p == 0:
+                self.drift_pitch[i] = first_pitch
+            else:
+                break
+        for i in range(len(self.drift_pitch)-1,0,-1):
+            if self.drift_pitch[i] == 0:
+                self.drift_pitch[i] = last_pitch
+            else:
+                break
+        for i, p in enumerate(self.drift_pitch):
+            if p == 0:
+                end = i+1
+                while self.drift_pitch[end] == 0:
+                    end += 1
+                for j in range(i,end):
+                    f = (j-i+1) *1.0 / (end-i+1)
+                    self.drift_pitch[j] = (1.0-f)*self.drift_pitch[i-1] + f*self.drift_pitch[end]
 
         # cleanup global pitch halvings and doublings, so everything spans 2 octaves at most
         for i, p in enumerate(self.pitch):
-            while p > 0 and p < self.mid_pitch*0.5:
+            # apply the global drift to determine the threshold here
+            drifted = self.drift_pitch[ max(0,min((i-drift_step//2) // drift_step, len(self.drift_pitch)-1)) ]
+            while p > 0 and p < drifted*0.66:
                 p *= 2
-            while p > self.mid_pitch*2.0:
+            while p > drifted*1.5:
                 p /= 2
             self.pitch[i] = p
 
@@ -156,15 +196,6 @@ class PitchContour:
             if mid_power <= 0:
                 return p[0],total_power
         return ps[-1][0],total_power
-        """
-        for p,pw in zip(self.pitch[start:end+1],self.power[start:end+1]):
-            if p != 0:
-              weighted += p*pw
-              total_power += pw
-        if total_power == 0:
-            return 0,0
-        return weighted / total_power, total_power
-        """
 
     def find_mode(self):
         counts = {}
@@ -173,10 +204,49 @@ class PitchContour:
                 counts[pt] = pw
             else:
                 counts[pt] += pw
-        bins = [ (p,counts[p]) for p in counts]
         # just pick the single highest bin
-        mode = max(bins, key=lambda x: x[1])
-        return mode[0]
+        mode = max(counts, key=lambda x: counts[x])
+        #bins = [ (p,counts[p]) for p in counts]
+        #mode = max(bins, key=lambda x: x[1])
+        return mode
+
+    def find_drift_modes(self, window_size=1.0, step=0.25):
+        # convert to indices
+        window_size = math.floor(window_size/self.window_size)+1
+        step = math.floor(step/self.window_size)+1
+        # initialise counts
+        counts = {}
+        power = 0
+        for pt,pw in zip(self.pitch[:window_size],self.power[:window_size]):
+            if not pt in counts:
+                counts[pt] = pw
+            else:
+                counts[pt] += pw
+            power += pw
+        modes = [max(counts, key=lambda x: counts[x])]
+        powers = [power]
+        # step through
+        start = 0
+        while start+window_size+step < len(self.pitch):
+            index = 0
+            while index < step:
+                # remove
+                pw = self.power[start+index]
+                counts[ self.pitch[start+index] ] -= pw
+                power -= pw
+                # and add
+                pt = self.pitch[start+index+window_size]
+                pw = self.power[start+index+window_size]
+                if not pt in counts:
+                    counts[pt] = pw
+                else:
+                    counts[pt] += pw
+                power += pw
+                index += 1
+            modes.append( max(counts, key=lambda x: counts[x]) )
+            powers.append(power)
+            start += step
+        return modes,powers
 
     def find_upper_power(self):
         spower = [p for p in self.power if p > 0]
