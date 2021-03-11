@@ -8,7 +8,13 @@ def find_instants(signal, contour, sampling_rate,frame_width=0.1):
     for start, end in contour.voiced_regions():
         print(start,end, int(start*sampling_rate),int(end*sampling_rate))
         # these are indices in the contour: convert to times
-        instants += find_voiced_instants(signal, contour, max(0,start-frame_width), end+frame_width, sampling_rate)
+        next_instants = find_voiced_instants(signal, contour, max(0,start-frame_width), end+frame_width, sampling_rate)
+        # add an artificial zero-power instant at either end of the segment
+        if len(next_instants) > 1:
+            instants.append( (2*next_instants[0][0] - next_instants[1][0],0) )
+        instants += next_instants
+        if len(next_instants) > 1:
+            instants.append( (2*next_instants[-1][0] - next_instants[-2][0],0) )
     return instants
 
 def find_weighted_median(crossings):
@@ -111,9 +117,13 @@ def find_voiced_instants(signal, contour, start, end, sampling_rate):
               if i < len(crossings):
                 length = crossings[i][0] - crossings[i-1][0]
                 cross = crossings[i]
+            elif length > w_median * 1.66: # needs to be a pretty clear pitch halving
+                # consider an extra artificial instant
+                crossings = crossings[:i] + [ ( (crossings[i-1][0]+crossings[i][0])//2, (crossings[i-1][1]+crossings[i][1])/2) ] + crossings[i:]
+                length = crossings[i][0] - crossings[i-1][0]
+                cross = crossings[i]
         i += 1
         prev_cross = cross
         prev_length = length
-
     return [(c[0] + start_index, c[1]) for c in crossings if c[1] != 0]
 

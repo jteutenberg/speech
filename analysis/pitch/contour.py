@@ -164,17 +164,24 @@ class PitchContour:
         self.pitch = np
 
     def get_pitch(self, time):
-        return self.pitch[int((time-self.times[0])/self.window_size)]
+        index = int((time-self.times[0])/self.window_size)
+        # window size can be slightly off, so for large multiples check rounding
+        if index > 0 and self.times[index] > time:
+            index -= 1
+        return self.pitch[index]
     
     def get_power(self, time):
         #interpolate between bins
         t = time-self.times[0]
         index = int(t/self.window_size)
+        # window size can be slightly off, so for large multiples check rounding
+        if index > 0 and self.times[index] > time:
+            index -= 1
         if index >= len(self.power)-1:
             if index == len(self.power)-1:
                 return self.power[-1]
             return 0
-        fraction = t/self.window_size - index
+        fraction = (time-self.times[index])/self.window_size
         return self.power[index]*(1.0-fraction) + self.power[index+1]*fraction
 
     def estimate_local(self, i):
