@@ -12,6 +12,9 @@ import re
 # - cv tokens: text split into subsequences of consonants and vowels
 # - graphemes: sequence of identifiers that roughly map to phonemes
 
+#TODO: K/S with 'c' split digraphs. e.g. "faced" (currently word-final cases are ok)
+#     note 'ucu' in 'mucus' vs 'uce' in 'puce'. Exception or rule?
+
 def graphemise_text(text):
   # tokenise into sentences and words, handle various punctuation as breaks
   graphemes = []
@@ -19,14 +22,14 @@ def graphemise_text(text):
 
   # 2. Find all sentences: ! ? .
   sentences = re.split(r'([?!\.]+)', text)
-  print(sentences)
+  #print(sentences)
   for i,s in enumerate(sentences):
     if len(s) <= 1 or s.startswith('.'): # some kind of delimeter
         continue
     final_sentence = i == len(sentences)-1
     # 3. Pauses: ,-; each get their own token
     phrases = re.split(r'([,;])', s) # TODO: hyphenated words need to not be split..
-    print(phrases)
+    #print(phrases)
     for j,p in enumerate(phrases):
         if len(p) <= 1 or p.startswith('-'):
             continue
@@ -41,7 +44,7 @@ def graphemise_text(text):
           for pre in prefix:
               graphemes = graphemes + graphemise_prefix(pre,graphemes)
           graphemes = graphemes + graphemise_word(word)
-          print(prefix,word,suffix)
+          #print(prefix,word,suffix)
           for suf in suffix:
               graphemes = graphemes + graphemise_suffix(suf,graphemes)
         if not final_phrase:

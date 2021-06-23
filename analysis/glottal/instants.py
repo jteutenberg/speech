@@ -80,6 +80,7 @@ def find_voiced_instants(signal, contour, start, end, sampling_rate):
 
     # select rising zero crossings: candidate list. Pair with power from the contour.
     crossings = [(i,contour.get_power(start + i/sampling_rate)) for i,x in enumerate(z) if i > 0 and x >= 0 and z[i-1] < 0]
+    
     #print("Found ",len(crossings)," zero crossings, or ",len(crossings)/(end-start) ,"Hz sampling rate of ",sampling_rate)
     if len(crossings) < 2:
         return crossings
@@ -118,12 +119,76 @@ def find_voiced_instants(signal, contour, start, end, sampling_rate):
                 length = crossings[i][0] - crossings[i-1][0]
                 cross = crossings[i]
             elif length > w_median * 1.66: # needs to be a pretty clear pitch halving
-                # consider an extra artificial instant
-                crossings = crossings[:i] + [ ( (crossings[i-1][0]+crossings[i][0])//2, (crossings[i-1][1]+crossings[i][1])/2) ] + crossings[i:]
+                if length > w_median * 2.5: # thirding?!
+                  crossings = crossings[:i] + [ ( (crossings[i-1][0]*2+crossings[i][0])//3, (crossings[i-1][1]*2+crossings[i][1])/3), ((crossings[i-1][0]+2*crossings[i][0])//3, (crossings[i-1][1]+2*crossings[i][1])/3) ] + crossings[i:]
+                  
+                else:
+                  # consider an extra artificial instant
+                  crossings = crossings[:i] + [ ( (crossings[i-1][0]+crossings[i][0])//2, (crossings[i-1][1]+crossings[i][1])/2) ] + crossings[i:]
                 length = crossings[i][0] - crossings[i-1][0]
                 cross = crossings[i]
         i += 1
         prev_cross = cross
         prev_length = length
-    return [(c[0] + start_index, c[1]) for c in crossings if c[1] != 0]
+    # finally, in original signal-space, shift each crossing to one of two adjacent upward crossings
+    temporal_crossings = []
+    #all_cs = []
+    for c in crossings:
+        if c[1] == 0:
+            continue
+        pos = c[0]+start_index
+        if signal[pos-1] < 0 and signal[pos+1] > 0:
+            temporal_crossings.append( (pos, c[1]) )
+        else:
+          next_pos = pos+1
+          while next_pos < len(signal)-1 and (signal[next_pos-1] > 0 or signal[next_pos+1] < 0):
+              next_pos += 1
+          prior_pos = pos-1
+          while prior_pos > 0 and (signal[prior_pos-1] > 0 or signal[prior_pos+1] < 0):
+              prior_pos -= 1
+          if prior_pos < pos-100:
+              if next_pos > pos+100:
+                temporal_crossings.append( (pos, c[1]) )
+              else:
+                temporal_crossings.append( (next_pos, c[1]) )
+          elif next_pos > pos+100:
+            temporal_crossings.append( (prior_pos, c[1]) )
+          else:
+            temporal_crossings.append( (prior_pos, next_pos, c[1]) )
+          #all_cs.append( (prior_pos, c[1]) )
+          #all_cs.append( (next_pos, c[1]) )
+          #print(prior_pos,next_pos)
+    return select_marks(temporal_crossings)
+    #return [(c[0] + start_index, c[1]) for c in crossings if c[1] != 0]
 
+# two dynamic programming functions for best pitch and best pitch marks. Both optimise for smoothness.
+
+def select_marks(choices):
+  # choices are lists/tuples of pitch marks and a final power value
+  # a state is an index in choices, the selected pitch mark, a cost, and previous state
+  states = [None]# (0,p,0,None) for p in choices[0][:-1] ]
+  for i,cs in enumerate(choices[1:]):
+      next_states = []
+      for mark in cs[:-1]:
+          if i < 2: # first two have no cost, so put in all combinations
+              for s in states:
+                  next_states.append( (i,mark,0,s) )
+          else:
+            best_prior = None
+            best_cost = -1
+            for s in states:
+              # cost is change in pitch period
+              delta = (s[1] - s[3][1]) - (mark - s[1])
+              cost = delta*delta + s[2]
+              if best_prior == None or cost < best_cost:
+                  best_cost = cost
+                  best_prior = s
+            next_states.append( (i, mark, best_cost, best_prior) )
+      states = next_states
+  # find the best final state and extract choices
+  end_state = min(states, key=lambda s: s[2])
+  best = []
+  while end_state != None:
+      best.append( (end_state[1], choices[end_state[0]][-1]) )
+      end_state = end_state[3] # prev
+  return best[::-1] # reverse
